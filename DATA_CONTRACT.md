@@ -22,6 +22,7 @@ These files contain your personal data, customizations, and work product. Update
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
+| `data/webapp/*` | Your web-app job records, stage history, and tailored resumes/cover letters |
 
 ## System Layer (safe to auto-update)
 
@@ -56,6 +57,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `batch/batch-prompt.md` | Batch worker prompt |
 | `batch/batch-runner.sh` | Batch orchestrator |
 | `dashboard/*` | Go TUI dashboard |
+| `webapp/*` | Local web app (server + UI) |
 | `templates/*` | Base templates |
 | `fonts/*` | Self-hosted fonts |
 | `.claude/skills/*` | Skill definitions |
