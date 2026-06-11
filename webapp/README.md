@@ -32,6 +32,23 @@ auth — don't expose it.
 - **Stage history** — every transition is timestamped with optional notes
   (e.g. "OA: 90 min HackerRank", "Round 2: system design").
 - **Stats** — applications sent, response/interview/offer rates, stage funnel.
+- **Inbox** — view and add URLs in `data/pipeline.md` (the CLI's URL inbox).
+  Process them with `/career-ops pipeline` in Claude Code, or evaluate
+  individual jobs straight from the board.
+- **Reports** — browse and read the evaluation reports in `reports/`.
+- **Tools** — run the CLI scripts from the browser with a live output console:
+  portal scanner (`scan.mjs`, with dry-run / single-company options), doctor,
+  pipeline verify, status normalization, dedup, tracker merge, rejection
+  patterns, follow-up cadence, update check, liveness checks, and the batch
+  evaluator. Nothing is re-implemented — the web app shells out to the exact
+  same scripts, allowlisted and with validated arguments.
+- **Per-job CLI actions** (in the job drawer): *Check liveness*
+  (`check-liveness.mjs`), *Add to inbox*, *View report*, and *Evaluate with
+  Claude* — a full A–G evaluation + report + tracker entry via
+  `batch/batch-runner.sh` headless workers (requires the `claude` CLI).
+- **Export PDF** — render a tailored resume/cover letter to an ATS-friendly
+  PDF in `output/` via the repo's `generate-pdf.mjs` (requires Playwright
+  Chromium: `npx playwright install chromium`).
 
 ## How it stays in sync with the CLI
 
@@ -83,6 +100,20 @@ GET/PUT /api/jobs/:id/documents/:type         type = resume | cover-letter
 POST   /api/jobs/:id/documents/:type/from-main  seed from cv.md
 POST   /api/jobs/:id/documents/:type/prompt     Claude-ready tailoring prompt
 POST   /api/jobs/:id/documents/:type/generate   run `claude -p` locally (501 if not installed)
+POST   /api/jobs/:id/liveness                 check-liveness.mjs on the job URL → run
+POST   /api/jobs/:id/inbox                    add job URL to data/pipeline.md
+POST   /api/jobs/:id/evaluate                 enqueue batch-input.tsv + start batch-runner.sh → run
+POST   /api/jobs/:id/documents/:type/pdf      render to output/{id}-{type}.pdf (generate-pdf.mjs)
 GET/PUT /api/resume                           main resume (cv.md)
 GET    /api/stats                             funnel + rates
+GET    /api/tools                             allowlisted CLI tools
+POST   /api/tools/:tool                       start a tool run (scan accepts {dryRun, company}; liveness {urls})
+GET    /api/runs, /api/runs/:id               run status + captured output
+GET/POST /api/pipeline                        URL inbox (data/pipeline.md)
+GET    /api/reports, /api/reports/:name       evaluation reports (raw + rendered HTML)
+GET    /api/output/:name.pdf                  download generated PDFs
 ```
+
+Long-running tools (scan, batch evaluation) run as background processes; the
+UI polls `/api/runs/:id` and streams output into the Tools console. Only one
+run per tool at a time.

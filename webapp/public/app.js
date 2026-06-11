@@ -39,6 +39,9 @@ function showView(name) {
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'stats') renderStats();
   if (name === 'resume') loadResume();
+  if (name === 'inbox') renderInbox();
+  if (name === 'reports') renderReports();
+  if (name === 'tools') renderTools();
 }
 
 $$('.navbtn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
@@ -219,6 +222,7 @@ function fillDrawer(job) {
   link.style.display = job.url ? '' : 'none';
   link.href = job.url || '#';
   $('#d-report').textContent = job.reportPath ? `Evaluation report: ${job.reportPath}` : '';
+  $('#d-view-report').classList.toggle('hidden', !job.reportPath);
 
   // history
   const ul = $('#d-history');
@@ -271,6 +275,40 @@ $('#d-delete').addEventListener('click', async () => {
     await refresh();
     toast('Deleted');
   } catch (err) { toast(err.message, true); }
+});
+
+$('#d-liveness').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  try {
+    const { run } = await api(`/api/jobs/${CURRENT.id}/liveness`, { method: 'POST' });
+    closeDrawer();
+    watchRun(run.id);
+  } catch (err) { toast(err.message, true); }
+});
+
+$('#d-inbox').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  try {
+    const r = await api(`/api/jobs/${CURRENT.id}/inbox`, { method: 'POST' });
+    toast(r.added ? 'Added to pipeline inbox' : `Not added: ${r.reason}`);
+  } catch (err) { toast(err.message, true); }
+});
+
+$('#d-evaluate').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  if (!confirm(`Run a full AI evaluation of "${CURRENT.role}" at ${CURRENT.company}?\n\nThis launches a headless Claude worker (batch-runner.sh): A–G scoring, evaluation report, tracker entry. It can take several minutes and uses your Claude subscription.`)) return;
+  try {
+    const { run } = await api(`/api/jobs/${CURRENT.id}/evaluate`, { method: 'POST' });
+    closeDrawer();
+    watchRun(run.id);
+  } catch (err) { toast(err.message, true); }
+});
+
+$('#d-view-report').addEventListener('click', () => {
+  if (!CURRENT || !CURRENT.reportPath) return;
+  const name = CURRENT.reportPath.split('/').pop();
+  closeDrawer();
+  openReport(name);
 });
 
 $('#d-jd-save').addEventListener('click', async () => {
@@ -344,6 +382,25 @@ for (const type of ['resume', 'cover-letter']) {
     }
   });
 
+  $('.act-pdf', pane).addEventListener('click', async () => {
+    if (!CURRENT) return;
+    const btn = $('.act-pdf', pane);
+    btn.disabled = true;
+    btn.textContent = 'Rendering…';
+    try {
+      // save current content first so the PDF matches the editor
+      await api(`/api/jobs/${CURRENT.id}/documents/${type}`, { method: 'PUT', body: { content: editor.value } });
+      const { url } = await api(`/api/jobs/${CURRENT.id}/documents/${type}/pdf`, { method: 'POST' });
+      window.open(url, '_blank');
+      toast('PDF saved to output/');
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Export PDF';
+    }
+  });
+
   $('.act-download', pane).addEventListener('click', () => {
     if (!CURRENT) return;
     const blob = new Blob([editor.value], { type: 'text/markdown' });
@@ -353,6 +410,132 @@ for (const type of ['resume', 'cover-letter']) {
     a.click();
     URL.revokeObjectURL(a.href);
   });
+}
+
+// ---------- inbox view ----------
+
+async function renderInbox() {
+  try {
+    const p = await api('/api/pipeline');
+    const section = (title, items, render) => items.length
+      ? `<h3>${title} (${items.length})</h3><ul class="inbox-list">${items.map(render).join('')}</ul>`
+      : '';
+    $('#inbox-lists').innerHTML =
+      section('Pending', p.pending, i =>
+        `<li><a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.url)}</a>
+         ${i.company ? `<span class="badge">${esc(i.company)}</span>` : ''}
+         ${i.role ? `<span class="badge">${esc(i.role)}</span>` : ''}</li>`) +
+      section('Errors', p.errors, i => `<li class="muted">${esc(i.raw)}</li>`) +
+      section('Processed', p.processed, i => `<li class="muted">${esc(i.raw)}</li>`) ||
+      '<p class="muted">Inbox is empty.</p>';
+  } catch (err) { toast(err.message, true); }
+}
+
+$('#inbox-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target).entries());
+  try {
+    const r = await api('/api/pipeline', { method: 'POST', body });
+    toast(r.added ? 'Added to inbox' : `Not added: ${r.reason}`);
+    e.target.reset();
+    renderInbox();
+  } catch (err) { toast(err.message, true); }
+});
+
+// ---------- reports view ----------
+
+async function renderReports() {
+  try {
+    const { reports } = await api('/api/reports');
+    const list = $('#report-list');
+    list.innerHTML = reports.length ? '' : '<li class="muted">No reports yet. Evaluate a job first.</li>';
+    for (const r of reports) {
+      const li = document.createElement('li');
+      li.innerHTML = `<button class="reportbtn">${esc(r.name)}</button>`;
+      $('button', li).addEventListener('click', async () => {
+        $$('.reportbtn', list).forEach(b => b.classList.remove('active'));
+        $('button', li).classList.add('active');
+        const data = await api(`/api/reports/${encodeURIComponent(r.name)}`);
+        const view = $('#report-view');
+        view.classList.remove('muted');
+        view.innerHTML = data.html;
+      });
+      list.appendChild(li);
+    }
+  } catch (err) { toast(err.message, true); }
+}
+
+// Open a specific report in the Reports view (used from the job drawer)
+async function openReport(name) {
+  showView('reports');
+  await renderReports();
+  const btn = $$('#report-list .reportbtn').find(b => b.textContent === name);
+  if (btn) btn.click();
+}
+
+// ---------- tools view ----------
+
+let pollTimer = null;
+
+async function renderTools() {
+  try {
+    const { tools } = await api('/api/tools');
+    const grid = $('#tools-grid');
+    grid.innerHTML = '';
+    for (const t of tools) {
+      const card = document.createElement('div');
+      card.className = 'toolcard';
+      const extra = t.id === 'scan'
+        ? `<label class="inline"><input type="checkbox" class="opt-dry"> dry run</label>
+           <input class="opt-company" placeholder="single company (optional)">`
+        : t.id === 'liveness'
+          ? `<input class="opt-urls" placeholder="URL(s), space-separated">`
+          : '';
+      card.innerHTML = `
+        <div class="tool-title">${esc(t.label)}</div>
+        <div class="hint">${esc(t.description)}</div>
+        <div class="tool-run">${extra}<button class="primary run-btn">Run</button></div>`;
+      $('.run-btn', card).addEventListener('click', async () => {
+        const body = {};
+        if (t.id === 'scan') {
+          if ($('.opt-dry', card).checked) body.dryRun = true;
+          const c = $('.opt-company', card).value.trim();
+          if (c) body.company = c;
+        }
+        if (t.id === 'liveness') {
+          body.urls = $('.opt-urls', card).value.trim().split(/\s+/).filter(Boolean);
+        }
+        try {
+          const { run } = await api(`/api/tools/${t.id}`, { method: 'POST', body });
+          toast(`${t.label} started`);
+          watchRun(run.id);
+        } catch (err) { toast(err.message, true); }
+      });
+      grid.appendChild(card);
+    }
+  } catch (err) { toast(err.message, true); }
+}
+
+function watchRun(runId) {
+  showView('tools');
+  clearInterval(pollTimer);
+  const tick = async () => {
+    try {
+      const { run } = await api(`/api/runs/${runId}`);
+      $('#run-status').textContent = `${run.tool} — ${run.status}${run.exitCode !== null ? ` (exit ${run.exitCode})` : ''}`;
+      const con = $('#tool-console');
+      con.textContent = run.output || '(no output yet)';
+      con.scrollTop = con.scrollHeight;
+      if (run.status !== 'running') {
+        clearInterval(pollTimer);
+        await refresh(); // tools may have changed the tracker/pipeline
+      }
+    } catch {
+      clearInterval(pollTimer);
+    }
+  };
+  tick();
+  pollTimer = setInterval(tick, 1500);
 }
 
 // ---------- resume view ----------

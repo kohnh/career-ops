@@ -8,9 +8,9 @@
 //   PORT=8080 node webapp/server.mjs
 
 import { createServer } from 'node:http';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
 import { join, dirname, extname, normalize, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
 
 import {
@@ -21,6 +21,10 @@ import {
   readMainResume, writeMainResume, deleteJob, getJob,
 } from './lib/store.mjs';
 import { STAGES } from './lib/stages.mjs';
+import {
+  TOOLS, startTool, listRuns, getRun, readPipeline, addToPipeline,
+  listReports, readReport, enqueueBatchEvaluation, mdToHtml,
+} from './lib/tools.mjs';
 
 const WEBAPP_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = process.env.CAREER_OPS_ROOT || dirname(WEBAPP_DIR);
@@ -86,6 +90,24 @@ function tailorPrompt(root, id, type) {
   ].join('\n');
 }
 
+// Print-friendly ATS-style shell around a tailored markdown document, fed to
+// the repo's own renderHtmlToPdf (generate-pdf.mjs) for PDF export.
+function docHtmlShell(markdown) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body { font: 11pt/1.45 Helvetica, Arial, sans-serif; color: #1a1a1a;
+           max-width: 7.3in; margin: 0 auto; padding: 0.2in 0; }
+    h1 { font-size: 19pt; margin: 0 0 4pt; }
+    h2 { font-size: 12.5pt; margin: 14pt 0 4pt; border-bottom: 1px solid #999; padding-bottom: 2pt; }
+    h3 { font-size: 11.5pt; margin: 10pt 0 2pt; }
+    p, li { margin: 3pt 0; }
+    ul { margin: 2pt 0; padding-left: 18pt; }
+    table { border-collapse: collapse; }
+    td { padding: 2pt 8pt 2pt 0; vertical-align: top; }
+    a { color: #1a1a1a; }
+    hr { border: none; border-top: 1px solid #bbb; margin: 10pt 0; }
+  </style></head><body>${mdToHtml(markdown)}</body></html>`;
+}
+
 // Optional AI generation: shells out to a local `claude -p` if available.
 function generateWithClaude(prompt) {
   return new Promise((resolve, reject) => {
@@ -137,6 +159,72 @@ async function handleApi(req, res, url) {
     });
   }
 
+  // /api/tools — allowlisted CLI scripts
+  if (parts[1] === 'tools') {
+    if (parts.length === 2 && method === 'GET') {
+      const tools = Object.entries(TOOLS).map(([id, t]) => ({ id, label: t.label, description: t.description }));
+      return send(res, 200, { tools });
+    }
+    if (parts.length === 3 && method === 'POST') {
+      const body = await readBody(req);
+      try {
+        return send(res, 202, { run: startTool(ROOT, parts[2], body) });
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+    }
+  }
+
+  // /api/runs — tool run status/output
+  if (parts[1] === 'runs') {
+    if (parts.length === 2 && method === 'GET') return send(res, 200, { runs: listRuns() });
+    if (parts.length === 3 && method === 'GET') {
+      const run = getRun(parts[2]);
+      return run ? send(res, 200, { run }) : send(res, 404, { error: 'not found' });
+    }
+  }
+
+  // /api/pipeline — URL inbox (data/pipeline.md)
+  if (parts[1] === 'pipeline' && parts.length === 2) {
+    if (method === 'GET') return send(res, 200, readPipeline(ROOT));
+    if (method === 'POST') {
+      const body = await readBody(req);
+      try {
+        return send(res, 201, addToPipeline(ROOT, String(body.url || ''), body.company, body.role));
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+    }
+  }
+
+  // /api/reports — evaluation reports
+  if (parts[1] === 'reports') {
+    if (parts.length === 2 && method === 'GET') return send(res, 200, { reports: listReports(ROOT) });
+    if (parts.length === 3 && method === 'GET') {
+      try {
+        const name = decodeURIComponent(parts[2]);
+        const content = readReport(ROOT, name);
+        if (content === null) return send(res, 404, { error: 'not found' });
+        return send(res, 200, { name, content, html: mdToHtml(content) });
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+    }
+  }
+
+  // GET /api/output/:name — download generated PDFs
+  if (parts[1] === 'output' && parts.length === 3 && method === 'GET') {
+    const name = decodeURIComponent(parts[2]);
+    if (!/^[\w.-]+\.pdf$/.test(name)) return send(res, 400, { error: 'invalid file name' });
+    const file = join(ROOT, 'output', name);
+    if (!existsSync(file)) return send(res, 404, { error: 'not found' });
+    res.writeHead(200, {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${name}"`,
+    });
+    return res.end(readFileSync(file));
+  }
+
   // /api/jobs ...
   if (parts[1] === 'jobs') {
     // /api/jobs
@@ -176,6 +264,40 @@ async function handleApi(req, res, url) {
       return job ? send(res, 200, { job }) : send(res, 404, { error: 'not found' });
     }
 
+    // POST /api/jobs/:id/liveness — check-liveness.mjs against the job URL
+    if (parts.length === 4 && parts[3] === 'liveness' && method === 'POST') {
+      const job = getJobView(ROOT, id);
+      if (!job) return send(res, 404, { error: 'not found' });
+      try {
+        return send(res, 202, { run: startTool(ROOT, 'liveness', { urls: [job.url] }) });
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+    }
+
+    // POST /api/jobs/:id/inbox — add the job URL to data/pipeline.md
+    if (parts.length === 4 && parts[3] === 'inbox' && method === 'POST') {
+      const job = getJobView(ROOT, id);
+      if (!job) return send(res, 404, { error: 'not found' });
+      try {
+        return send(res, 201, addToPipeline(ROOT, job.url, job.company, job.role));
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+    }
+
+    // POST /api/jobs/:id/evaluate — full AI evaluation via batch-runner.sh
+    if (parts.length === 4 && parts[3] === 'evaluate' && method === 'POST') {
+      const job = getJobView(ROOT, id);
+      if (!job) return send(res, 404, { error: 'not found' });
+      try {
+        const { batchId, run } = enqueueBatchEvaluation(ROOT, job, readJd(ROOT, id));
+        return send(res, 202, { batchId, run });
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+    }
+
     // /api/jobs/:id/jd
     if (parts.length === 4 && parts[3] === 'jd') {
       if (method === 'GET') return send(res, 200, { content: readJd(ROOT, id) });
@@ -211,6 +333,20 @@ async function handleApi(req, res, url) {
         if (parts[5] === 'prompt') {
           const prompt = tailorPrompt(ROOT, id, type);
           return prompt ? send(res, 200, { prompt }) : send(res, 404, { error: 'not found' });
+        }
+        if (parts[5] === 'pdf') {
+          const content = readDoc(ROOT, id, type);
+          if (!content.trim()) return send(res, 400, { error: 'document is empty — write or generate it first' });
+          try {
+            const { renderHtmlToPdf } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
+            const html = docHtmlShell(content);
+            const name = `${id}-${type}.pdf`;
+            mkdirSync(join(ROOT, 'output'), { recursive: true });
+            await renderHtmlToPdf(html, join(ROOT, 'output', name));
+            return send(res, 200, { file: name, url: `/api/output/${name}` });
+          } catch (e) {
+            return send(res, 500, { error: `PDF render failed (is Playwright Chromium installed? npx playwright install chromium): ${e.message}` });
+          }
         }
         if (parts[5] === 'generate') {
           const prompt = tailorPrompt(ROOT, id, type);
