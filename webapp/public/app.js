@@ -16,7 +16,14 @@ async function api(path, opts = {}) {
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // An old server process answers new frontend routes with its 404
+    // catch-all — the fix is a restart, so say that instead of the raw error.
+    if (res.status === 404 && data.error === 'unknown endpoint') {
+      throw new Error('This endpoint is missing from the running server — restart it (Ctrl+C, then npm run web) to load the latest code.');
+    }
+    throw new Error(data.error || `${res.status} ${res.statusText}`);
+  }
   return data;
 }
 
