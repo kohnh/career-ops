@@ -92,10 +92,14 @@ function renderBoard() {
     col.className = 'col';
     col.dataset.stage = stage.id;
     col.innerHTML = `
-      <div class="col-head"><span>${esc(stage.label)}</span><span class="count">${jobs.length}</span></div>
+      <div class="col-head"><span class="col-dot"></span><span>${esc(stage.label)}</span><span class="count">${jobs.length}</span></div>
       <div class="col-body"></div>`;
     const body = $('.col-body', col);
-    jobs.forEach(j => body.appendChild(cardEl(j)));
+    if (jobs.length) {
+      jobs.forEach(j => body.appendChild(cardEl(j)));
+    } else {
+      body.innerHTML = '<div class="col-empty">Drop a job here</div>';
+    }
 
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('dragover'); });
     col.addEventListener('dragleave', () => col.classList.remove('dragover'));
