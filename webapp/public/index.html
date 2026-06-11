@@ -11,6 +11,9 @@
   <div class="brand">career-<span>ops</span></div>
   <nav>
     <button class="navbtn active" data-view="board">Board</button>
+    <button class="navbtn" data-view="inbox">Inbox</button>
+    <button class="navbtn" data-view="reports">Reports</button>
+    <button class="navbtn" data-view="tools">Tools</button>
     <button class="navbtn" data-view="resume">Resume</button>
     <button class="navbtn" data-view="stats">Stats</button>
   </nav>
@@ -23,6 +26,39 @@
 <main>
   <section id="view-board" class="view active">
     <div id="board" class="board"></div>
+  </section>
+
+  <section id="view-inbox" class="view">
+    <h2>URL inbox <code>data/pipeline.md</code></h2>
+    <p class="hint">Paste job URLs here as you find them. Process them with
+      <code>/career-ops pipeline</code> in Claude Code (full AI evaluation), or use
+      <em>Evaluate</em> on individual board jobs.</p>
+    <form id="inbox-form" class="inbox-form">
+      <input name="url" type="url" required placeholder="https://… job posting URL">
+      <input name="company" placeholder="Company (optional)">
+      <input name="role" placeholder="Role (optional)">
+      <button type="submit" class="primary">Add to inbox</button>
+    </form>
+    <div id="inbox-lists"></div>
+  </section>
+
+  <section id="view-reports" class="view">
+    <h2>Evaluation reports <code>reports/</code></h2>
+    <div class="reports-layout">
+      <ul id="report-list" class="report-list"></ul>
+      <article id="report-view" class="report-view muted">Select a report.</article>
+    </div>
+  </section>
+
+  <section id="view-tools" class="view">
+    <h2>CLI tools</h2>
+    <p class="hint">Each button runs the corresponding repo script (same code the CLI uses) and streams its output below.</p>
+    <div id="tools-grid" class="tools-grid"></div>
+    <div class="console-head">
+      <h3>Output</h3>
+      <span id="run-status" class="muted"></span>
+    </div>
+    <pre id="tool-console" class="console">No runs yet.</pre>
   </section>
 
   <section id="view-resume" class="view">
@@ -135,6 +171,12 @@
       <a id="d-open-url" class="linkbtn" target="_blank" rel="noopener">Open posting ↗</a>
       <button id="d-delete" class="danger ghost">Delete</button>
     </div>
+    <div class="row-actions cli-actions">
+      <button id="d-liveness" class="ghost" title="check-liveness.mjs — is the posting still up?">Check liveness</button>
+      <button id="d-inbox" class="ghost" title="Add URL to data/pipeline.md">Add to inbox</button>
+      <button id="d-evaluate" class="ghost" title="batch-runner.sh — full A–G evaluation + report + tracker via headless Claude">Evaluate with Claude</button>
+      <button id="d-view-report" class="ghost hidden">View report</button>
+    </div>
     <p id="d-report" class="hint"></p>
   </div>
 
@@ -160,6 +202,7 @@
     <button class="ghost act-prompt">Copy AI tailoring prompt</button>
     <button class="ghost act-generate">Generate with Claude</button>
     <button class="ghost act-download">Download .md</button>
+    <button class="ghost act-pdf">Export PDF</button>
   </div>
   <textarea class="doc-editor" rows="18" spellcheck="false"
     placeholder="Tailored document in markdown…"></textarea>

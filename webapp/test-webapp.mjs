@@ -16,6 +16,10 @@ import {
 } from './lib/store.mjs';
 import { canonicalForStage, stageForCanonical, stageLabel } from './lib/stages.mjs';
 import { createJob, setStage, listJobs, updateJob, getJobView } from './lib/jobs.mjs';
+import {
+  TOOLS, startTool, getRun, readPipeline, addToPipeline,
+  listReports, readReport, enqueueBatchEvaluation, mdToHtml,
+} from './lib/tools.mjs';
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const ROOT = mkdtempSync(join(tmpdir(), 'careerops-webapp-test-'));
@@ -129,6 +133,77 @@ check('getJobView reflects merge', getJobView(ROOT, trackerOnly.id)?.stage === '
 
 const patched = updateJob(ROOT, job.id, { notes: 'final note', salary: '150k' });
 check('patch fields', patched.salary === '150k' && patched.notes === 'final note');
+
+// --- tools: command building & validation ---
+section('tools');
+check('scan builds plain argv', TOOLS.scan.build(ROOT).args.join(' ').endsWith('scan.mjs'));
+check('scan options validated', TOOLS.scan.build(ROOT, { dryRun: true, company: 'Acme Inc' }).args.includes('--dry-run'));
+let threw = false;
+try { TOOLS.scan.build(ROOT, { company: 'x; rm -rf /' }); } catch { threw = true; }
+check('scan rejects shell metacharacters in company', threw);
+threw = false;
+try { TOOLS.liveness.build(ROOT, { urls: ['ftp://nope'] }); } catch { threw = true; }
+check('liveness rejects non-http URLs', threw);
+threw = false;
+try { startTool(ROOT, 'doctor'); } catch (e) { threw = /script not found/.test(e.message); }
+check('startTool refuses missing scripts', threw);
+
+// real spawn round-trip using the copied merge-tracker.mjs
+const run = startTool(ROOT, 'merge');
+check('run starts in running state', run.status === 'running' && run.id);
+await new Promise(resolve => {
+  const t = setInterval(() => {
+    if (getRun(run.id).status !== 'running') { clearInterval(t); resolve(); }
+  }, 100);
+});
+const finished = getRun(run.id);
+check('merge run completes', finished.status === 'done' && finished.exitCode === 0);
+check('run captures output', finished.output.length > 0);
+
+// --- pipeline inbox ---
+section('pipeline inbox');
+check('empty inbox parses', readPipeline(ROOT).pending.length === 0);
+const add1 = addToPipeline(ROOT, 'https://example.com/job/1', 'Acme', 'SRE');
+check('URL added', add1.added === true);
+check('duplicate rejected', addToPipeline(ROOT, 'https://example.com/job/1').added === false);
+threw = false;
+try { addToPipeline(ROOT, 'javascript:alert(1)'); } catch { threw = true; }
+check('non-http URL rejected', threw);
+addToPipeline(ROOT, 'https://example.com/job/2');
+const inbox = readPipeline(ROOT);
+check('pending parsed with metadata', inbox.pending.length === 2 && inbox.pending.some(p => p.company === 'Acme'));
+check('newest entry first under Pending', inbox.pending[0].url === 'https://example.com/job/2');
+
+// --- reports ---
+section('reports');
+mkdirSync(join(ROOT, 'reports'), { recursive: true });
+writeFileSync(join(ROOT, 'reports', '001-acme-2026-06-01.md'), '# Report\n\n**Score:** 4.2/5\n\n| A | B |\n|---|---|\n| x | y |');
+const reports = listReports(ROOT);
+check('report listed', reports.length === 1 && reports[0].name === '001-acme-2026-06-01.md');
+check('report content read', readReport(ROOT, '001-acme-2026-06-01.md').includes('4.2/5'));
+threw = false;
+try { readReport(ROOT, '../cv.md'); } catch { threw = true; }
+check('traversal in report name rejected', threw);
+
+// --- markdown rendering ---
+section('markdown');
+const html = mdToHtml('# Title\n\n**bold** and *em* and `code`\n\n- item\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n[link](https://x.co) <script>');
+check('headings render', html.includes('<h1>Title</h1>'));
+check('inline styles render', html.includes('<strong>bold</strong>') && html.includes('<em>em</em>') && html.includes('<code>code</code>'));
+check('lists render', html.includes('<li>item</li>'));
+check('tables render', html.includes('<table>') && html.includes('<td>1</td>'));
+check('links render safely', html.includes('href="https://x.co"'));
+check('html is escaped', !html.includes('<script>'));
+
+// --- batch enqueue ---
+section('batch enqueue');
+threw = false;
+try { enqueueBatchEvaluation(ROOT, { company: 'X', role: 'Y', url: '' }); } catch { threw = true; }
+check('evaluation requires URL', threw);
+// batch-runner.sh doesn't exist in the temp root: input row must still be written before the spawn fails
+try { enqueueBatchEvaluation(ROOT, { company: 'Hooli', role: 'ML Engineer', url: 'https://example.com/j/9' }, 'jd text'); } catch {}
+const batchInput = readFileSync(join(ROOT, 'batch', 'batch-input.tsv'), 'utf8');
+check('batch-input.tsv row appended', batchInput.includes('https://example.com/j/9') && batchInput.includes('ML Engineer @ Hooli'));
 
 // --- summary ---
 rmSync(ROOT, { recursive: true, force: true });
