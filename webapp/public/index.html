@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>career-ops</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">career-<span>ops</span></div>
+  <nav>
+    <button class="navbtn active" data-view="board">Board</button>
+    <button class="navbtn" data-view="resume">Resume</button>
+    <button class="navbtn" data-view="stats">Stats</button>
+  </nav>
+  <div class="topbar-right">
+    <input id="search" type="search" placeholder="Search company / role…">
+    <button id="add-job-btn" class="primary">+ Add job</button>
+  </div>
+</header>
+
+<main>
+  <section id="view-board" class="view active">
+    <div id="board" class="board"></div>
+  </section>
+
+  <section id="view-resume" class="view">
+    <div class="editor-head">
+      <h2>Main resume <code>cv.md</code></h2>
+      <div>
+        <span id="resume-status" class="save-status"></span>
+        <button id="resume-save" class="primary">Save</button>
+      </div>
+    </div>
+    <textarea id="resume-editor" spellcheck="false"
+      placeholder="# Your Name&#10;&#10;## Summary&#10;…&#10;&#10;## Experience&#10;…"></textarea>
+    <p class="hint">This is the canonical CV used by the whole pipeline. Tailored resumes start from this file.</p>
+  </section>
+
+  <section id="view-stats" class="view">
+    <h2>Pipeline stats</h2>
+    <div id="stats-cards" class="cards"></div>
+    <div id="funnel" class="funnel"></div>
+  </section>
+</main>
+
+<!-- Add job modal -->
+<div id="add-modal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h2>Add job</h2>
+    <form id="add-form">
+      <div class="grid2">
+        <label>Company *<input name="company" required></label>
+        <label>Role *<input name="role" required></label>
+        <label>Job URL<input name="url" type="url" placeholder="https://…"></label>
+        <label>Source
+          <select name="source">
+            <option value="">—</option>
+            <option>LinkedIn</option>
+            <option>Indeed</option>
+            <option>Greenhouse</option>
+            <option>Lever</option>
+            <option>Ashby</option>
+            <option>Company site</option>
+            <option>Referral</option>
+            <option>Other</option>
+          </select>
+        </label>
+        <label>Location<input name="location" placeholder="Remote / City"></label>
+        <label>Salary<input name="salary" placeholder="e.g. 120–150k"></label>
+        <label>Stage
+          <select name="stage">
+            <option value="saved" selected>Saved</option>
+            <option value="applied">Applied</option>
+            <option value="oa">OA</option>
+            <option value="interview">Interview</option>
+          </select>
+        </label>
+        <label>Notes<input name="notes"></label>
+      </div>
+      <label>Job description (paste full JD — saved to <code>jds/</code>)
+        <textarea name="jd" rows="8" spellcheck="false"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="ghost" id="add-cancel">Cancel</button>
+        <button type="submit" class="primary">Save job</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Job detail drawer -->
+<div id="drawer-backdrop" class="drawer-backdrop hidden"></div>
+<aside id="drawer" class="drawer hidden">
+  <div class="drawer-head">
+    <div>
+      <h2 id="d-role"></h2>
+      <div id="d-company" class="muted"></div>
+      <div id="d-meta" class="chips"></div>
+    </div>
+    <button id="drawer-close" class="ghost">✕</button>
+  </div>
+
+  <div class="stage-controls">
+    <div class="stage-buttons" id="d-stages"></div>
+    <div id="d-round-row" class="round-row hidden">
+      <label>Interview round
+        <input id="d-round" type="number" min="1" max="20" value="1">
+      </label>
+      <button id="d-round-apply" class="ghost">Set round</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="jd">Job description</button>
+    <button class="tab" data-tab="resume">Tailored resume</button>
+    <button class="tab" data-tab="cover-letter">Cover letter</button>
+    <button class="tab" data-tab="history">History</button>
+  </div>
+
+  <div id="tab-overview" class="tabpane active">
+    <form id="d-form" class="grid2">
+      <label>Company<input name="company"></label>
+      <label>Role<input name="role"></label>
+      <label>URL<input name="url"></label>
+      <label>Source<input name="source"></label>
+      <label>Location<input name="location"></label>
+      <label>Salary<input name="salary"></label>
+    </form>
+    <label>Notes<textarea id="d-notes" rows="3"></textarea></label>
+    <div class="row-actions">
+      <button id="d-save" class="primary">Save changes</button>
+      <a id="d-open-url" class="linkbtn" target="_blank" rel="noopener">Open posting ↗</a>
+      <button id="d-delete" class="danger ghost">Delete</button>
+    </div>
+    <p id="d-report" class="hint"></p>
+  </div>
+
+  <div id="tab-jd" class="tabpane">
+    <textarea id="d-jd" rows="18" spellcheck="false" placeholder="Paste the job description here…"></textarea>
+    <div class="row-actions">
+      <button id="d-jd-save" class="primary">Save JD</button>
+      <span class="save-status" id="d-jd-status"></span>
+    </div>
+  </div>
+
+  <div id="tab-resume" class="tabpane" data-doc="resume"></div>
+  <div id="tab-cover-letter" class="tabpane" data-doc="cover-letter"></div>
+
+  <div id="tab-history" class="tabpane">
+    <ul id="d-history" class="timeline"></ul>
+  </div>
+</aside>
+
+<template id="doc-pane-template">
+  <div class="doc-actions">
+    <button class="ghost act-from-main">Start from main resume</button>
+    <button class="ghost act-prompt">Copy AI tailoring prompt</button>
+    <button class="ghost act-generate">Generate with Claude</button>
+    <button class="ghost act-download">Download .md</button>
+  </div>
+  <textarea class="doc-editor" rows="18" spellcheck="false"
+    placeholder="Tailored document in markdown…"></textarea>
+  <div class="row-actions">
+    <button class="primary act-save">Save</button>
+    <span class="save-status"></span>
+  </div>
+</template>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>

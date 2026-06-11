@@ -5,6 +5,8 @@
   "private": true,
   "scripts": {
     "doctor": "node doctor.mjs",
+    "web": "node webapp/server.mjs",
+    "test:web": "node webapp/test-webapp.mjs",
     "verify": "node verify-pipeline.mjs",
     "normalize": "node normalize-statuses.mjs",
     "dedup": "node dedup-tracker.mjs",
